@@ -12,7 +12,7 @@ service cloud.firestore {
     match /threads/{threadId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() 
-        && request.resource.data.noteCount == 1;
+        && request.resource.data.noteCount == 0;
       allow update: if isAuthenticated()
         && (
           // Only allow updating specific fields

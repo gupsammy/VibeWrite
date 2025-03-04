@@ -60,8 +60,13 @@ export default function Home() {
     setIsWriting(true);
   };
 
+  // This function won't get called until after navigation to the thread page
+  // So we need to ensure it doesn't cause issues
   const handleRecordingComplete = () => {
-    setIsRecording(false);
+    // Use a timeout to prevent state updates on unmounted components
+    setTimeout(() => {
+      setIsRecording(false);
+    }, 0);
   };
 
   const handleWritingComplete = () => {

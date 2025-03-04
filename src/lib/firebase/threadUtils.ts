@@ -17,10 +17,25 @@ import { getAuth } from "firebase/auth";
 const threadsCollection = collection(db, "threads");
 const notesCollection = collection(db, "notes");
 
-// Create a new thread
+// Create a new empty thread
+export const createEmptyThread = async (): Promise<string> => {
+  const threadData: Omit<Thread, "id"> = {
+    title: "New Thread",
+    description: "Processing...",
+    tags: [],
+    createdAt: Timestamp.now(),
+    updatedAt: Timestamp.now(),
+    noteCount: 0, // Start with 0 notes
+  };
+
+  const threadRef = await addDoc(threadsCollection, threadData);
+  return threadRef.id;
+};
+
+// Create a new thread with initial note
 export const createThread = async (
   initialNote: Omit<Note, "id" | "threadId" | "createdAt" | "updatedAt">
-) => {
+): Promise<string> => {
   const threadData: Omit<Thread, "id"> = {
     title: "New Thread",
     description: "Processing...",
@@ -40,6 +55,7 @@ export const createThread = async (
   };
 
   await addDoc(notesCollection, noteData);
+
   return threadRef.id;
 };
 

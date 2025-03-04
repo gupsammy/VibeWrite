@@ -3,12 +3,8 @@
 import { useState, useEffect, useRef } from "react";
 import { Mic, Square } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { createThread, addNoteToThread } from "@/lib/firebase/threadUtils";
-import {
-  useDeepgram,
-  LiveTranscriptionEvents,
-  DeepgramTranscription,
-} from "@/lib/contexts/DeepgramContext";
+import { createEmptyThread, addNoteToThread } from "@/lib/firebase/threadUtils";
+import { useRouter } from "next/navigation";
 
 interface VoiceRecorderProps {
   threadId?: string;
@@ -22,93 +18,42 @@ export const VoiceRecorder = ({
   onClose,
 }: VoiceRecorderProps) => {
   const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [recordingTime, setRecordingTime] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [createdThreadId, setCreatedThreadId] = useState<string | null>(null);
+
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<NodeJS.Timeout>();
-  const connectionRef = useRef<any>(null);
-  const { deepgramClient, isLoading, error: deepgramError } = useDeepgram();
+  const router = useRouter();
 
   useEffect(() => {
     return () => {
       if (timerRef.current) {
         clearInterval(timerRef.current);
       }
-
-      // Clean up Deepgram connection when component unmounts
-      if (connectionRef.current) {
-        connectionRef.current.close();
-      }
     };
   }, []);
 
-  // Handle Deepgram initialization error
-  useEffect(() => {
-    if (deepgramError) {
-      setError(deepgramError.message);
-    }
-  }, [deepgramError]);
-
   const startRecording = async () => {
-    if (isLoading || !deepgramClient) {
-      setError("Deepgram is not ready yet. Please try again.");
-      return;
-    }
-
     try {
       setError(null);
+      audioChunksRef.current = [];
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: "audio/webm",
-      });
+      const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
-      setIsRecording(true);
-      setTranscript("");
 
-      // Initialize Deepgram live transcription
-      const connection = deepgramClient.listen.live({
-        model: "nova-2",
-        punctuate: true,
-        interim_results: true,
-        language: "en",
-      });
-
-      connectionRef.current = connection;
-
-      // Set up event listeners
-      connection.on(LiveTranscriptionEvents.Open, () => {
-        console.log("Deepgram connection established");
-
-        // Start sending audio data once the connection is open
-        mediaRecorder.ondataavailable = (event) => {
-          if (event.data.size > 0 && connection.getReadyState() === 1) {
-            connection.send(event.data);
-          }
-        };
-
-        mediaRecorder.start(250); // Collect data every 250ms
-      });
-
-      connection.on(
-        LiveTranscriptionEvents.Transcript,
-        (data: DeepgramTranscription) => {
-          const receivedTranscript = data.channel.alternatives[0].transcript;
-          if (receivedTranscript) {
-            setTranscript(receivedTranscript);
-          }
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
         }
-      );
+      };
 
-      connection.on(LiveTranscriptionEvents.Error, (error) => {
-        console.error("Deepgram error:", error);
-        setError("Error during transcription. Please try again.");
-        stopRecording();
-      });
-
-      connection.on(LiveTranscriptionEvents.Close, () => {
-        console.log("Deepgram connection closed");
-      });
+      mediaRecorder.start();
+      setIsRecording(true);
 
       // Start recording timer
       timerRef.current = setInterval(() => {
@@ -117,51 +62,97 @@ export const VoiceRecorder = ({
     } catch (error) {
       console.error("Error starting recording:", error);
       setError("Could not access microphone. Please check your permissions.");
-      setIsRecording(false);
     }
   };
 
   const stopRecording = async () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      mediaRecorderRef.current.stream
-        .getTracks()
-        .forEach((track) => track.stop());
-      setIsRecording(false);
+    if (!mediaRecorderRef.current || !isRecording) return;
 
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-      }
+    setIsRecording(false);
+    setIsTranscribing(true);
 
-      // Close Deepgram connection
-      if (connectionRef.current) {
-        connectionRef.current.close();
-        connectionRef.current = null;
-      }
-
-      // Save the note
-      if (transcript) {
-        try {
-          if (threadId) {
-            // Add note to existing thread
-            await addNoteToThread(threadId, {
-              content: transcript,
-              type: "audio",
-            });
-          } else {
-            // Create new thread with this note
-            await createThread({
-              content: transcript,
-              type: "audio",
-            });
-          }
-          onRecordingComplete?.();
-          setRecordingTime(0);
-        } catch (error) {
-          console.error("Error saving note:", error);
-        }
-      }
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
     }
+
+    // Create a callback for when recording is stopped
+    mediaRecorderRef.current.onstop = async () => {
+      try {
+        // Create a blob from all the audio chunks
+        const audioBlob = new Blob(audioChunksRef.current, {
+          type: "audio/webm",
+        });
+
+        // Convert blob to base64 string for easier transmission
+        const reader = new FileReader();
+        reader.readAsDataURL(audioBlob);
+        reader.onloadend = async () => {
+          const base64Audio = reader.result as string;
+
+          // Create a new thread or use existing one
+          let targetThreadId = threadId;
+
+          // If we don't have a threadId, create an empty thread
+          if (!targetThreadId) {
+            try {
+              const newThreadId = await createEmptyThread();
+              setCreatedThreadId(newThreadId);
+              targetThreadId = newThreadId;
+
+              // Navigate to the new thread page
+              router.push(`/thread/${newThreadId}`);
+            } catch (error) {
+              console.error("Error creating thread:", error);
+              setError("Failed to create a new thread. Please try again.");
+              setIsTranscribing(false);
+              return;
+            }
+          }
+
+          // Send the audio to our API for transcription
+          try {
+            const response = await fetch("/api/deepgram/transcribe", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ audioData: base64Audio }),
+            });
+
+            if (!response.ok) {
+              throw new Error(`Transcription failed: ${response.statusText}`);
+            }
+
+            const data = await response.json();
+            setTranscript(data.transcript);
+
+            // Add the transcription as a new note to the thread
+            if (targetThreadId) {
+              await addNoteToThread(targetThreadId, {
+                content: data.transcript,
+                type: "audio",
+              });
+            }
+
+            setIsTranscribing(false);
+            onRecordingComplete?.();
+            setRecordingTime(0);
+          } catch (error) {
+            console.error("Transcription error:", error);
+            setError("Failed to transcribe audio. Please try again.");
+            setIsTranscribing(false);
+          }
+        };
+      } catch (error) {
+        console.error("Error processing recording:", error);
+        setError("Failed to process recording. Please try again.");
+        setIsTranscribing(false);
+      }
+    };
+
+    // Stop the media recorder to trigger the onstop callback
+    mediaRecorderRef.current.stop();
+    mediaRecorderRef.current.stream
+      .getTracks()
+      .forEach((track) => track.stop());
   };
 
   const formatTime = (seconds: number) => {
@@ -173,7 +164,7 @@ export const VoiceRecorder = ({
   return (
     <AnimatePresence>
       <motion.div
-        className="fixed inset-0 bg-black/50 flex items-center justify-center p-4"
+        className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
@@ -186,11 +177,17 @@ export const VoiceRecorder = ({
         >
           <div className="text-center mb-6">
             <h3 className="text-lg font-semibold text-gray-900">
-              {isRecording ? "Recording..." : "Start Recording"}
+              {isRecording
+                ? "Recording..."
+                : isTranscribing
+                ? "Transcribing Audio..."
+                : "Start Recording"}
             </h3>
             <p className="text-sm text-gray-500 mt-1">
               {isRecording
                 ? formatTime(recordingTime)
+                : isTranscribing
+                ? "Please wait while we process your audio"
                 : "Press the button to start"}
             </p>
             {error && (
@@ -200,15 +197,6 @@ export const VoiceRecorder = ({
                 animate={{ opacity: 1, y: 0 }}
               >
                 {error}
-              </motion.p>
-            )}
-            {isLoading && (
-              <motion.p
-                className="text-sm text-blue-500 mt-2"
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-              >
-                Initializing Deepgram...
               </motion.p>
             )}
           </div>
@@ -225,24 +213,29 @@ export const VoiceRecorder = ({
             )}
 
             <div className="flex justify-center">
-              <motion.button
-                className={`w-16 h-16 rounded-full flex items-center justify-center ${
-                  isRecording ? "bg-red-500" : "bg-blue-500"
-                } text-white`}
-                whileTap={{ scale: 0.95 }}
-                onClick={isRecording ? stopRecording : startRecording}
-                disabled={isLoading}
-              >
-                {isRecording ? (
-                  <Square className="w-6 h-6" />
-                ) : (
-                  <Mic className="w-6 h-6" />
-                )}
-              </motion.button>
+              {isTranscribing ? (
+                <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center">
+                  <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                </div>
+              ) : (
+                <motion.button
+                  className={`w-16 h-16 rounded-full flex items-center justify-center ${
+                    isRecording ? "bg-red-500" : "bg-blue-500"
+                  } text-white`}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={isRecording ? stopRecording : startRecording}
+                >
+                  {isRecording ? (
+                    <Square className="w-6 h-6" />
+                  ) : (
+                    <Mic className="w-6 h-6" />
+                  )}
+                </motion.button>
+              )}
             </div>
           </div>
 
-          {onClose && (
+          {onClose && !isTranscribing && (
             <button
               className="mt-6 w-full text-sm text-gray-500 hover:text-gray-700"
               onClick={onClose}

@@ -88,6 +88,16 @@ export default function ThreadPage({ params }: { params: { id: string } }) {
               </div>
             ))}
           </div>
+        ) : notes.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12">
+            <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center mb-4">
+              <div className="w-6 h-6 border-3 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+            </div>
+            <p className="text-gray-500">Transcribing your audio...</p>
+            <p className="text-xs text-gray-400 mt-2">
+              This may take a few moments
+            </p>
+          </div>
         ) : (
           <motion.div
             className="space-y-4"
