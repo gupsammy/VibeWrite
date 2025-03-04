@@ -1,3 +1,4 @@
+
 rules_version = '2';
 
 service cloud.firestore {
@@ -11,11 +12,8 @@ service cloud.firestore {
     match /threads/{threadId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() 
-        && request.resource.data.createdAt == request.time
-        && request.resource.data.updatedAt == request.time
         && request.resource.data.noteCount == 1;
       allow update: if isAuthenticated()
-        && request.resource.data.updatedAt == request.time
         && (
           // Only allow updating specific fields
           request.resource.data.diff(resource.data).affectedKeys()
@@ -28,11 +26,9 @@ service cloud.firestore {
     match /notes/{noteId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated()
-        && request.resource.data.createdAt == request.time
-        && request.resource.data.updatedAt == request.time
         && exists(/databases/$(database)/documents/threads/$(request.resource.data.threadId));
       allow update: if false; // Notes are immutable
       allow delete: if false; // Disable deletion for now
     }
   }
-} 
+}
