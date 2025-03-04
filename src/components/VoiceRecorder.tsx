@@ -1,168 +1,257 @@
 "use client";
 
-import { useState } from "react";
-import { useDeepgram, SOCKET_STATES } from "@/lib/contexts/DeepgramContext";
-import { addDocument } from "@/lib/firebase/firebaseUtils";
-import { motion } from "framer-motion";
-import { useNotes } from "@/lib/hooks/useNotes";
+import { useState, useEffect, useRef } from "react";
+import { Mic, Square } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { createThread, addNoteToThread } from "@/lib/firebase/threadUtils";
+import {
+  useDeepgram,
+  LiveTranscriptionEvents,
+  DeepgramTranscription,
+} from "@/lib/contexts/DeepgramContext";
 
-export default function VoiceRecorder() {
+interface VoiceRecorderProps {
+  threadId?: string;
+  onRecordingComplete?: () => void;
+  onClose?: () => void;
+}
+
+export const VoiceRecorder = ({
+  threadId,
+  onRecordingComplete,
+  onClose,
+}: VoiceRecorderProps) => {
   const [isRecording, setIsRecording] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const {
-    connectToDeepgram,
-    disconnectFromDeepgram,
-    connectionState,
-    realtimeTranscript,
-    error: deepgramError,
-  } = useDeepgram();
-  const { refreshNotes } = useNotes();
+  const [transcript, setTranscript] = useState("");
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const timerRef = useRef<NodeJS.Timeout>();
+  const connectionRef = useRef<any>(null);
+  const { deepgramClient, isLoading, error: deepgramError } = useDeepgram();
 
-  const handleStartRecording = async () => {
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+
+      // Clean up Deepgram connection when component unmounts
+      if (connectionRef.current) {
+        connectionRef.current.close();
+      }
+    };
+  }, []);
+
+  // Handle Deepgram initialization error
+  useEffect(() => {
+    if (deepgramError) {
+      setError(deepgramError.message);
+    }
+  }, [deepgramError]);
+
+  const startRecording = async () => {
+    if (isLoading || !deepgramClient) {
+      setError("Deepgram is not ready yet. Please try again.");
+      return;
+    }
+
     try {
-      await connectToDeepgram();
+      setError(null);
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: "audio/webm",
+      });
+      mediaRecorderRef.current = mediaRecorder;
       setIsRecording(true);
+      setTranscript("");
+
+      // Initialize Deepgram live transcription
+      const connection = deepgramClient.listen.live({
+        model: "nova-2",
+        punctuate: true,
+        interim_results: true,
+        language: "en",
+      });
+
+      connectionRef.current = connection;
+
+      // Set up event listeners
+      connection.on(LiveTranscriptionEvents.Open, () => {
+        console.log("Deepgram connection established");
+
+        // Start sending audio data once the connection is open
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0 && connection.getReadyState() === 1) {
+            connection.send(event.data);
+          }
+        };
+
+        mediaRecorder.start(250); // Collect data every 250ms
+      });
+
+      connection.on(
+        LiveTranscriptionEvents.Transcript,
+        (data: DeepgramTranscription) => {
+          const receivedTranscript = data.channel.alternatives[0].transcript;
+          if (receivedTranscript) {
+            setTranscript(receivedTranscript);
+          }
+        }
+      );
+
+      connection.on(LiveTranscriptionEvents.Error, (error) => {
+        console.error("Deepgram error:", error);
+        setError("Error during transcription. Please try again.");
+        stopRecording();
+      });
+
+      connection.on(LiveTranscriptionEvents.Close, () => {
+        console.log("Deepgram connection closed");
+      });
+
+      // Start recording timer
+      timerRef.current = setInterval(() => {
+        setRecordingTime((prev) => prev + 1);
+      }, 1000);
     } catch (error) {
-      console.error("Failed to start recording:", error);
+      console.error("Error starting recording:", error);
+      setError("Could not access microphone. Please check your permissions.");
+      setIsRecording(false);
     }
   };
 
-  const handleStopRecording = async () => {
-    try {
-      setIsSaving(true);
-      disconnectFromDeepgram();
+  const stopRecording = async () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      mediaRecorderRef.current.stream
+        .getTracks()
+        .forEach((track) => track.stop());
       setIsRecording(false);
 
-      // Save the note to Firebase
-      if (realtimeTranscript.trim()) {
-        await addDocument("notes", {
-          text: realtimeTranscript.trim(),
-          timestamp: new Date().toISOString(),
-        });
-
-        // Refresh the notes list
-        refreshNotes();
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
       }
-    } catch (error) {
-      console.error("Error saving note:", error);
-    } finally {
-      setIsSaving(false);
+
+      // Close Deepgram connection
+      if (connectionRef.current) {
+        connectionRef.current.close();
+        connectionRef.current = null;
+      }
+
+      // Save the note
+      if (transcript) {
+        try {
+          if (threadId) {
+            // Add note to existing thread
+            await addNoteToThread(threadId, {
+              content: transcript,
+              type: "audio",
+            });
+          } else {
+            // Create new thread with this note
+            await createThread({
+              content: transcript,
+              type: "audio",
+            });
+          }
+          onRecordingComplete?.();
+          setRecordingTime(0);
+        } catch (error) {
+          console.error("Error saving note:", error);
+        }
+      }
     }
   };
 
-  // Audio visualization animation variants
-  const waveVariants = {
-    recording: {
-      scale: [1, 1.2, 1.5, 1.2, 1],
-      opacity: [0.6, 0.8, 1, 0.8, 0.6],
-      transition: {
-        duration: 1.5,
-        repeat: Infinity,
-        ease: "easeInOut",
-      },
-    },
-    idle: {
-      scale: 1,
-      opacity: 0.6,
-    },
+  const formatTime = (seconds: number) => {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes}:${remainingSeconds.toString().padStart(2, "0")}`;
   };
 
   return (
-    <div className="w-full max-w-md mx-auto">
-      {deepgramError && (
-        <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-md">
-          {deepgramError}
-        </div>
-      )}
-
-      <button
-        onClick={isRecording ? handleStopRecording : handleStartRecording}
-        disabled={isSaving}
-        className={`w-full py-3 px-4 rounded-full flex items-center justify-center transition-all ${
-          isRecording
-            ? "bg-red-500 hover:bg-red-600"
-            : "bg-blue-500 hover:bg-blue-600"
-        } text-white font-bold ${
-          isSaving ? "opacity-70 cursor-not-allowed" : ""
-        }`}
+    <AnimatePresence>
+      <motion.div
+        className="fixed inset-0 bg-black/50 flex items-center justify-center p-4"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
       >
-        {isSaving ? (
-          <>
-            <svg
-              className="animate-spin -ml-1 mr-3 h-5 w-5 text-white"
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-            >
-              <circle
-                className="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                strokeWidth="4"
-              ></circle>
-              <path
-                className="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-              ></path>
-            </svg>
-            Saving...
-          </>
-        ) : isRecording ? (
-          <>
-            <svg
-              className="w-5 h-5 mr-2"
-              fill="currentColor"
-              viewBox="0 0 20 20"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <path d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z"></path>
-            </svg>
-            Stop Recording
-          </>
-        ) : (
-          <>
-            <svg
-              className="w-5 h-5 mr-2"
-              fill="currentColor"
-              viewBox="0 0 20 20"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <path
-                fillRule="evenodd"
-                d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z"
-                clipRule="evenodd"
-              ></path>
-            </svg>
-            Start Recording
-          </>
-        )}
-      </button>
-
-      {isRecording && (
-        <div className="mt-6 p-5 bg-white rounded-lg shadow-md">
-          <div className="flex justify-center space-x-2 mb-4">
-            {[...Array(5)].map((_, i) => (
-              <motion.div
-                key={i}
-                variants={waveVariants}
-                animate="recording"
-                initial="idle"
-                custom={i}
-                style={{ animationDelay: `${i * 0.1}s` }}
-                className="w-2 h-12 bg-blue-500 rounded-full"
-              />
-            ))}
-          </div>
-          <div className="mt-4 p-3 bg-gray-50 rounded-md max-h-40 overflow-y-auto">
-            <p className="text-gray-700 whitespace-pre-wrap break-words">
-              {realtimeTranscript || "Listening..."}
+        <motion.div
+          className="bg-white rounded-2xl p-6 w-full max-w-md"
+          initial={{ scale: 0.9, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          exit={{ scale: 0.9, opacity: 0 }}
+        >
+          <div className="text-center mb-6">
+            <h3 className="text-lg font-semibold text-gray-900">
+              {isRecording ? "Recording..." : "Start Recording"}
+            </h3>
+            <p className="text-sm text-gray-500 mt-1">
+              {isRecording
+                ? formatTime(recordingTime)
+                : "Press the button to start"}
             </p>
+            {error && (
+              <motion.p
+                className="text-sm text-red-500 mt-2"
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+              >
+                {error}
+              </motion.p>
+            )}
+            {isLoading && (
+              <motion.p
+                className="text-sm text-blue-500 mt-2"
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+              >
+                Initializing Deepgram...
+              </motion.p>
+            )}
           </div>
-        </div>
-      )}
-    </div>
+
+          <div className="relative">
+            {transcript && (
+              <motion.div
+                className="bg-gray-50 rounded-lg p-4 mb-4 text-gray-700 text-sm"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+              >
+                {transcript}
+              </motion.div>
+            )}
+
+            <div className="flex justify-center">
+              <motion.button
+                className={`w-16 h-16 rounded-full flex items-center justify-center ${
+                  isRecording ? "bg-red-500" : "bg-blue-500"
+                } text-white`}
+                whileTap={{ scale: 0.95 }}
+                onClick={isRecording ? stopRecording : startRecording}
+                disabled={isLoading}
+              >
+                {isRecording ? (
+                  <Square className="w-6 h-6" />
+                ) : (
+                  <Mic className="w-6 h-6" />
+                )}
+              </motion.button>
+            </div>
+          </div>
+
+          {onClose && (
+            <button
+              className="mt-6 w-full text-sm text-gray-500 hover:text-gray-700"
+              onClick={onClose}
+            >
+              Cancel
+            </button>
+          )}
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
   );
-}
+};

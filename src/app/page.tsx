@@ -1,39 +1,113 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import VoiceRecorder from "@/components/VoiceRecorder";
-import NotesList from "@/components/NotesList";
-import Header from "@/components/Header";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { EmptyState } from "@/components/EmptyState";
+import { FloatingDock } from "@/components/FloatingDock";
+import { ThreadList } from "@/components/ThreadList";
+import { VoiceRecorder } from "@/components/VoiceRecorder";
+import { WriteNoteModal } from "@/components/WriteNoteModal";
+import { Thread } from "@/lib/types/thread";
+import { subscribeToThreads } from "@/lib/firebase/threadUtils";
+import { useAuth } from "@/lib/hooks/useAuth";
 
 export default function Home() {
+  const [threads, setThreads] = useState<Thread[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isWriting, setIsWriting] = useState(false);
+  const { user, loading: authLoading } = useAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.push("/login");
+      return;
+    }
+
+    if (!user) return; // Don't set up subscription if not authenticated
+
+    let unsubscribe: (() => void) | undefined;
+
+    const setupSubscription = async () => {
+      try {
+        unsubscribe = await subscribeToThreads((updatedThreads) => {
+          setThreads(updatedThreads);
+          setIsLoading(false);
+        });
+      } catch (err) {
+        console.error("Error setting up thread subscription:", err);
+        setError(err as Error);
+        setIsLoading(false);
+      }
+    };
+
+    setupSubscription();
+
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
+  }, [user, authLoading, router]);
+
+  const handleRecord = () => {
+    setIsRecording(true);
+  };
+
+  const handleWrite = () => {
+    setIsWriting(true);
+  };
+
+  const handleRecordingComplete = () => {
+    setIsRecording(false);
+  };
+
+  const handleWritingComplete = () => {
+    setIsWriting(false);
+  };
+
+  // Show loading state while checking authentication
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="text-gray-500">Loading...</p>
+      </div>
+    );
+  }
+
+  // Don't render anything if not authenticated (will redirect)
+  if (!user) {
+    return null;
+  }
+
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
-      <Header />
-
-      <main className="flex-1">
-        <div className="max-w-4xl mx-auto px-4 py-8">
-          <div className="text-center mb-10">
-            <h2 className="text-2xl md:text-3xl font-bold text-gray-800 mb-2">
-              Record Your Thoughts
-            </h2>
-            <p className="text-gray-600">
-              Capture ideas, reminders, and notes with your voice
-            </p>
+    <div className="min-h-screen bg-white">
+      <main className="max-w-4xl mx-auto px-4">
+        {threads.length === 0 && !isLoading ? (
+          <EmptyState />
+        ) : (
+          <div className="py-8">
+            <ThreadList threads={threads} isLoading={isLoading} error={error} />
           </div>
-
-          <div className="bg-white rounded-xl shadow-md p-6 mb-8">
-            <VoiceRecorder />
-          </div>
-
-          <NotesList />
-        </div>
+        )}
       </main>
+      <FloatingDock onRecord={handleRecord} onWrite={handleWrite} />
 
-      <footer className="bg-white py-4 border-t">
-        <div className="max-w-4xl mx-auto px-4 text-center text-sm text-gray-500">
-          &copy; {new Date().getFullYear()} VibeWrite - Voice Notes App
-        </div>
-      </footer>
+      {isRecording && (
+        <VoiceRecorder
+          onRecordingComplete={handleRecordingComplete}
+          onClose={() => setIsRecording(false)}
+        />
+      )}
+
+      {isWriting && (
+        <WriteNoteModal
+          onComplete={handleWritingComplete}
+          onClose={() => setIsWriting(false)}
+        />
+      )}
     </div>
   );
 }

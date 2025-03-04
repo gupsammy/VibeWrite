@@ -1,0 +1,8 @@
+{
+  "projects": {
+    "default": "vibewrite-5f467",
+    "staging": "vibewrite-5f467"
+  },
+  "targets": {},
+  "etags": {}
+}
