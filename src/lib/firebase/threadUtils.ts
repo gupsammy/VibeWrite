@@ -8,6 +8,7 @@ import {
   doc,
   Timestamp,
   getDoc,
+  where,
 } from "firebase/firestore";
 import { db } from "./firebase";
 import { Thread, Note } from "../types/thread";
@@ -23,6 +24,7 @@ export const createEmptyThread = async (): Promise<string> => {
     title: "New Thread",
     description: "Processing...",
     tags: [],
+    leadingQuestions: [],
     createdAt: Timestamp.now(),
     updatedAt: Timestamp.now(),
     noteCount: 0, // Start with 0 notes
@@ -40,6 +42,7 @@ export const createThread = async (
     title: "New Thread",
     description: "Processing...",
     tags: [],
+    leadingQuestions: [],
     createdAt: Timestamp.now(),
     updatedAt: Timestamp.now(),
     noteCount: 1,
@@ -50,11 +53,19 @@ export const createThread = async (
   const noteData: Omit<Note, "id"> = {
     ...initialNote,
     threadId: threadRef.id,
+    isPrompt: false,
     createdAt: Timestamp.now(),
     updatedAt: Timestamp.now(),
   };
 
   await addDoc(notesCollection, noteData);
+
+  // Trigger LLM processing asynchronously
+  fetch("/api/gemini/process-thread", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ threadId: threadRef.id }),
+  }).catch((error) => console.error("Error triggering LLM:", error));
 
   return threadRef.id;
 };
@@ -74,6 +85,7 @@ export const addNoteToThread = async (
   const newNote: Omit<Note, "id"> = {
     ...noteData,
     threadId,
+    isPrompt: false,
     createdAt: Timestamp.now(),
     updatedAt: Timestamp.now(),
   };
@@ -84,6 +96,13 @@ export const addNoteToThread = async (
     noteCount: (threadDoc.data() as Thread).noteCount + 1,
     updatedAt: Timestamp.now(),
   });
+
+  // Trigger LLM processing asynchronously
+  fetch("/api/gemini/process-thread", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ threadId }),
+  }).catch((error) => console.error("Error triggering LLM:", error));
 
   return noteRef.id;
 };
@@ -146,15 +165,37 @@ export const subscribeToThreadNotes = (
   threadId: string,
   callback: (notes: Note[]) => void
 ) => {
-  const q = query(notesCollection, orderBy("createdAt", "asc"));
+  console.log(
+    "[ThreadUtils] Setting up notes subscription for threadId:",
+    threadId
+  );
 
-  return onSnapshot(q, (snapshot) => {
-    const notes = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    })) as Note[];
+  // Create a query that filters notes by threadId and orders by createdAt
+  const q = query(
+    notesCollection,
+    where("threadId", "==", threadId),
+    orderBy("createdAt", "asc")
+  );
 
-    const threadNotes = notes.filter((note) => note.threadId === threadId);
-    callback(threadNotes);
-  });
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      console.log("[ThreadUtils] Notes snapshot received:", {
+        empty: snapshot.empty,
+        size: snapshot.size,
+      });
+
+      const notes = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      })) as Note[];
+
+      console.log("[ThreadUtils] Parsed notes:", notes);
+
+      callback(notes);
+    },
+    (error) => {
+      console.error("[ThreadUtils] Notes subscription error:", error);
+    }
+  );
 };

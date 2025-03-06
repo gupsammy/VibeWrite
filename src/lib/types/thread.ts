@@ -5,6 +5,7 @@ export interface Thread {
   title: string;
   description: string;
   tags: string[];
+  leadingQuestions?: string[];
   createdAt: Timestamp;
   updatedAt: Timestamp;
   noteCount: number;
@@ -15,6 +16,7 @@ export interface Note {
   threadId: string;
   content: string;
   type: "audio" | "text";
+  isPrompt?: boolean;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
