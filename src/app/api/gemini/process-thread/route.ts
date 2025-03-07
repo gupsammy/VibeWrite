@@ -1,18 +1,28 @@
 import { NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { db } from "@/lib/firebase/firebase";
-import {
-  collection,
-  query,
-  where,
-  orderBy,
-  getDocs,
-  doc,
-  updateDoc,
-  Timestamp,
-  addDoc,
-} from "firebase/firestore";
+import { initializeApp, cert, getApps } from "firebase-admin/app";
+import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { Note } from "@/lib/types/thread";
+
+// Initialize Firebase Admin SDK
+if (!getApps().length) {
+  console.log("Initializing Firebase Admin SDK");
+  try {
+    initializeApp({
+      credential: cert({
+        projectId: process.env.FIREBASE_PROJECT_ID,
+        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+        privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
+      }),
+    });
+    console.log("Firebase Admin SDK initialized successfully");
+  } catch (error) {
+    console.error("Error initializing Firebase Admin:", error);
+    throw error;
+  }
+}
+
+const adminDb = getFirestore();
 
 export async function POST(req: Request) {
   console.log("=== Starting API request processing ===");
@@ -31,20 +41,26 @@ export async function POST(req: Request) {
     console.log("Environment check:");
     console.log("NODE_ENV:", process.env.NODE_ENV);
     console.log(
-      "API Key status:",
-      process.env.GOOGLE_API_KEY ? "Present" : "Missing"
+      "Firebase Project ID:",
+      process.env.FIREBASE_PROJECT_ID ? "Present" : "Missing"
     );
-    console.log("API Key length:", process.env.GOOGLE_API_KEY?.length || 0);
-
-    // Fetch all notes for the thread
-    const notesCollection = collection(db, "notes");
-    const q = query(
-      notesCollection,
-      where("threadId", "==", threadId),
-      orderBy("createdAt", "asc")
+    console.log(
+      "Firebase Client Email:",
+      process.env.FIREBASE_CLIENT_EMAIL ? "Present" : "Missing"
+    );
+    console.log(
+      "Firebase Private Key:",
+      process.env.FIREBASE_PRIVATE_KEY ? "Present" : "Missing"
     );
 
-    const snapshot = await getDocs(q);
+    // Fetch all notes for the thread using Admin SDK
+    const notesRef = adminDb.collection("notes");
+    const q = notesRef
+      .where("threadId", "==", threadId)
+      .orderBy("createdAt", "asc");
+
+    console.log("Executing Firestore query...");
+    const snapshot = await q.get();
     console.log("Firestore query completed, documents found:", !snapshot.empty);
 
     if (snapshot.empty) {
@@ -79,7 +95,7 @@ You are an AI assistant helping users organize their thoughts in a note-taking a
 3. 3-5 contextual tags
 4. 3 leading exploratory questions based on the most recent note
 
-Return the response in this exact JSON format, with no additional text:
+Always only return a structured JSON object, with no additional text and no markdown formatting:
 
 {
 "title": "Thread Title",
@@ -102,7 +118,7 @@ Generate the title, description, and tags based on all notes. Generate the three
     const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY || "");
     console.log("Gemini client initialized");
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-001" });
     console.log("Gemini model selected");
 
     // Generate content
@@ -110,42 +126,43 @@ Generate the title, description, and tags based on all notes. Generate the three
     const response = await result.response;
     const resultText = response.text();
 
-    // Parse the response as JSON
-    let metadata;
+    // Before parsing, clean up the response to remove markdown formatting
+    const cleanResponse = resultText.replace(/```json\n?|\n?```/g, "").trim();
+
     try {
-      metadata = JSON.parse(resultText);
+      const parsedResponse = JSON.parse(cleanResponse);
+      // Update the thread in Firestore
+      const threadsCollection = adminDb.collection("threads");
+      const threadRef = threadsCollection.doc(threadId);
+      await threadRef.update({
+        title: parsedResponse.title,
+        description: parsedResponse.description,
+        tags: parsedResponse.tags,
+        leadingQuestions: parsedResponse.questions,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+
+      // Store questions as a note with isPrompt flag
+      const promptNote = {
+        threadId,
+        content: parsedResponse.questions.join("\n"),
+        type: "text",
+        isPrompt: true,
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      };
+
+      await adminDb.collection("notes").add(promptNote);
+
+      return NextResponse.json({ success: true, metadata: parsedResponse });
     } catch (error) {
       console.error("Error parsing LLM response:", error);
+      console.error("Raw response:", cleanResponse);
       return NextResponse.json(
-        { error: "Failed to parse LLM response", responseText: resultText },
+        { error: "Failed to parse LLM response" },
         { status: 500 }
       );
     }
-
-    // Update the thread in Firestore
-    const threadsCollection = collection(db, "threads");
-    const threadRef = doc(threadsCollection, threadId);
-    await updateDoc(threadRef, {
-      title: metadata.title,
-      description: metadata.description,
-      tags: metadata.tags,
-      leadingQuestions: metadata.questions,
-      updatedAt: Timestamp.now(),
-    });
-
-    // Store questions as a note with isPrompt flag
-    const promptNote = {
-      threadId,
-      content: metadata.questions.join("\n"),
-      type: "text",
-      isPrompt: true,
-      createdAt: Timestamp.now(),
-      updatedAt: Timestamp.now(),
-    };
-
-    await addDoc(collection(db, "notes"), promptNote);
-
-    return NextResponse.json({ success: true, metadata });
   } catch (error: any) {
     // Type assertion to fix linter errors
     console.error("=== Detailed Error Information ===");
