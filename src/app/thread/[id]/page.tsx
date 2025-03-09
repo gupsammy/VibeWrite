@@ -85,12 +85,12 @@ export default function ThreadPage({ params }: { params: { id: string } }) {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="container mx-auto px-4">
+      <div className="container max-w-4xl mx-auto px-4">
         <div className="py-4">
           <Link href="/" passHref>
             <Button
               variant="ghost"
-              className="flex items-center text-muted-foreground hover:text-foreground"
+              className="flex items-center text-muted-foreground hover:text-foreground px-0"
             >
               <ArrowLeft className="w-4 h-4 mr-2" />
               <span>Back to Threads</span>
@@ -98,11 +98,11 @@ export default function ThreadPage({ params }: { params: { id: string } }) {
           </Link>
         </div>
 
-        <div className="py-4">
+        <div className="py-2">
           {thread && <ThreadHeader thread={thread} />}
 
           {isLoading ? (
-            <div className="space-y-4">
+            <div className="space-y-4 mt-8">
               {[...Array(3)].map((_, index) => (
                 <div
                   key={index}
@@ -114,7 +114,7 @@ export default function ThreadPage({ params }: { params: { id: string } }) {
               ))}
             </div>
           ) : notes.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12">
+            <div className="flex flex-col items-center justify-center py-12 mt-8">
               <div className="w-12 h-12 rounded-full bg-primary-100 flex items-center justify-center mb-4">
                 <div className="w-6 h-6 border-3 border-primary border-t-transparent rounded-full animate-spin"></div>
               </div>
@@ -127,7 +127,7 @@ export default function ThreadPage({ params }: { params: { id: string } }) {
             </div>
           ) : (
             <motion.div
-              className="space-y-4"
+              className="space-y-0 mt-8"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.5 }}
