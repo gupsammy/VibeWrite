@@ -1,4 +1,5 @@
 import { Timestamp } from "firebase/firestore";
+import { Note } from "./note";
 
 export interface Thread {
   id: string;
@@ -9,16 +10,6 @@ export interface Thread {
   createdAt: Timestamp;
   updatedAt: Timestamp;
   noteCount: number;
-}
-
-export interface Note {
-  id: string;
-  threadId: string;
-  content: string;
-  type: "audio" | "text";
-  isPrompt?: boolean;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
 }
 
 export interface ThreadWithNotes extends Thread {

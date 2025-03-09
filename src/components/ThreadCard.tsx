@@ -1,57 +1,62 @@
 "use client";
 
 import { Thread } from "@/lib/types/thread";
-import { motion } from "framer-motion";
-import { MessageSquare, ChevronRight, CalendarDays } from "lucide-react";
+import { formatDate } from "@/lib/utils";
+import { MessageSquare, CalendarDays } from "lucide-react";
 import Link from "next/link";
-import { format } from "date-fns";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { motion } from "framer-motion";
 
 interface ThreadCardProps {
   thread: Thread;
 }
 
-// Helper function to format Firestore timestamp
-const formatDate = (timestamp: any) => {
-  if (!timestamp) return "Unknown date";
-
-  // Convert Firestore timestamp to JS Date if needed
-  const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-  return format(date, "MMM d, yyyy");
-};
-
 export const ThreadCard = ({ thread }: ThreadCardProps) => {
   return (
-    <Link href={`/thread/${thread.id}`}>
+    <Link href={`/thread/${thread.id}`} className="block">
       <motion.div
-        className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 cursor-pointer hover:shadow-md transition-shadow"
-        whileHover={{ scale: 1.02 }}
+        whileHover={{ y: -4 }}
         transition={{ type: "spring", stiffness: 500, damping: 30 }}
       >
-        <h3 className="font-medium text-lg text-gray-900">{thread.title}</h3>
-        <p className="text-gray-500 mt-1 text-sm line-clamp-2">
-          {thread.description}
-        </p>
-
-        {thread.tags && thread.tags.length > 0 && (
-          <div className="flex flex-wrap gap-2 mt-3">
-            {thread.tags.map((tag, index) => (
-              <span
-                key={index}
-                className="px-2 py-1 bg-gray-100 text-gray-600 rounded-full text-xs"
-              >
-                {tag}
+        <Card className="h-full">
+          <CardHeader className="pb-3">
+            <CardTitle className="line-clamp-1">{thread.title}</CardTitle>
+            <CardDescription className="line-clamp-2">
+              {thread.description}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="pb-2">
+            {thread.tags && thread.tags.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {thread.tags.map((tag, index) => (
+                  <Badge key={index} variant="secondary">
+                    {tag}
+                  </Badge>
+                ))}
+              </div>
+            )}
+          </CardContent>
+          <CardFooter className="text-xs text-muted-foreground">
+            <div className="flex items-center">
+              <CalendarDays className="mr-1 h-3 w-3" />
+              <span>{formatDate(thread.updatedAt.toDate())}</span>
+            </div>
+            <div className="ml-auto flex items-center">
+              <MessageSquare className="mr-1 h-3 w-3" />
+              <span>
+                {thread.noteCount} {thread.noteCount === 1 ? "note" : "notes"}
               </span>
-            ))}
-          </div>
-        )}
-
-        <div className="flex items-center mt-4 text-xs text-gray-400">
-          <CalendarDays className="w-3 h-3 mr-1" />
-          {formatDate(thread.updatedAt)}
-          <div className="mx-2">•</div>
-          <MessageSquare className="w-3 h-3 mr-1" />
-          {thread.noteCount} {thread.noteCount === 1 ? "note" : "notes"}
-        </div>
+            </div>
+          </CardFooter>
+        </Card>
       </motion.div>
     </Link>
   );

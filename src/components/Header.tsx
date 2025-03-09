@@ -1,27 +1,79 @@
-import React from "react";
+"use client";
 
-export default function Header() {
+import { useState } from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { Search } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
+export function Header() {
+  const pathname = usePathname();
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const isActive = (path: string) => {
+    return pathname === path;
+  };
+
   return (
-    <header className="bg-white shadow-sm">
-      <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
-        <div className="flex items-center">
-          <svg
-            className="h-8 w-8 text-blue-500 mr-2"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-            <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-            <line x1="12" y1="19" x2="12" y2="23"></line>
-            <line x1="8" y1="23" x2="16" y2="23"></line>
-          </svg>
-          <h1 className="text-xl font-bold text-gray-800">VibeWrite</h1>
+    <header className="border-b bg-white">
+      <div className="container mx-auto px-4 py-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-8">
+            {/* Logo */}
+            <Link href="/" className="flex items-center">
+              <span className="text-xl font-semibold">
+                <span className="text-primary">Vibe</span>Write
+              </span>
+            </Link>
+
+            {/* Navigation Tabs */}
+            <Tabs defaultValue="threads" className="w-auto">
+              <TabsList className="bg-transparent h-9">
+                <Link href="/" passHref>
+                  <TabsTrigger
+                    value="threads"
+                    className={cn(
+                      "data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:font-medium",
+                      isActive("/")
+                        ? "border-b-2 border-primary rounded-none"
+                        : ""
+                    )}
+                  >
+                    Threads
+                  </TabsTrigger>
+                </Link>
+                <Link href="/sources" passHref>
+                  <TabsTrigger
+                    value="sources"
+                    className={cn(
+                      "data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:font-medium",
+                      isActive("/sources")
+                        ? "border-b-2 border-primary rounded-none"
+                        : ""
+                    )}
+                  >
+                    Sources
+                  </TabsTrigger>
+                </Link>
+              </TabsList>
+            </Tabs>
+          </div>
+
+          {/* Search Bar */}
+          <div className="relative w-[300px]">
+            <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+              <Search className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <input
+              type="text"
+              placeholder="Search Threads..."
+              className="w-full py-2 pl-10 pr-4 bg-muted/50 border-0 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
         </div>
-        <div className="text-sm text-gray-500">Voice Notes App</div>
       </div>
     </header>
   );

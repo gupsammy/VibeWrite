@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Thread, Note } from "@/lib/types/thread";
+import { Thread } from "@/lib/types/thread";
+import { Note } from "@/lib/types/note";
 import { subscribeToThreadNotes } from "@/lib/firebase/threadUtils";
 import { FloatingDock } from "@/components/FloatingDock";
 import { VoiceRecorder } from "@/components/VoiceRecorder";
@@ -11,6 +12,10 @@ import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { db } from "@/lib/firebase/firebase";
 import { doc, onSnapshot } from "firebase/firestore";
+import { ThreadHeader } from "@/components/ThreadHeader";
+import { NoteItem } from "@/components/NoteItem";
+import { LeadingQuestions } from "@/components/LeadingQuestions";
+import { Button } from "@/components/ui/button";
 
 export default function ThreadPage({ params }: { params: { id: string } }) {
   const [thread, setThread] = useState<Thread | null>(null);
@@ -19,7 +24,6 @@ export default function ThreadPage({ params }: { params: { id: string } }) {
   const [error, setError] = useState<Error | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [isWriting, setIsWriting] = useState(false);
-  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
 
   useEffect(() => {
     // Subscribe to thread metadata
@@ -42,21 +46,11 @@ export default function ThreadPage({ params }: { params: { id: string } }) {
       }
     );
 
-    // Cycle through questions every 5 seconds if they exist
-    const interval = setInterval(() => {
-      if (thread?.leadingQuestions?.length) {
-        setCurrentQuestionIndex(
-          (prev) => (prev + 1) % thread.leadingQuestions.length
-        );
-      }
-    }, 5000);
-
     return () => {
       unsubscribeThread();
       unsubscribeNotes();
-      clearInterval(interval);
     };
-  }, [params.id, thread?.leadingQuestions?.length]);
+  }, [params.id]);
 
   const handleRecord = () => {
     setIsRecording(true);
@@ -76,15 +70,13 @@ export default function ThreadPage({ params }: { params: { id: string } }) {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-white p-4">
-        <div className="max-w-4xl mx-auto">
-          <div className="flex items-center justify-center h-[50vh]">
-            <div className="text-center">
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                Oops! Something went wrong
-              </h3>
-              <p className="text-gray-500">{error.message}</p>
-            </div>
+      <div className="container mx-auto px-4 py-8">
+        <div className="flex items-center justify-center h-[50vh]">
+          <div className="text-center">
+            <h3 className="text-lg font-semibold mb-2">
+              Oops! Something went wrong
+            </h3>
+            <p className="text-muted-foreground">{error.message}</p>
           </div>
         </div>
       </div>
@@ -92,110 +84,70 @@ export default function ThreadPage({ params }: { params: { id: string } }) {
   }
 
   return (
-    <div className="min-h-screen bg-white">
-      <header className="border-b border-gray-100">
-        <div className="max-w-4xl mx-auto px-4">
-          <div className="h-16 flex items-center">
-            <Link
-              href="/"
-              className="flex items-center text-gray-500 hover:text-gray-900"
+    <div className="min-h-screen bg-background">
+      <div className="container max-w-4xl mx-auto px-4">
+        <div className="py-4">
+          <Link href="/" passHref>
+            <Button
+              variant="ghost"
+              className="flex items-center text-muted-foreground hover:text-foreground px-0"
             >
-              <ArrowLeft className="w-5 h-5 mr-2" />
-              <span>Back</span>
-            </Link>
-          </div>
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              <span>Back to Threads</span>
+            </Button>
+          </Link>
         </div>
-      </header>
 
-      <main className="max-w-4xl mx-auto px-4 py-8">
-        {thread && (
-          <motion.div
-            className="mb-8"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.5 }}
-          >
-            <h1 className="text-2xl font-bold text-gray-900">{thread.title}</h1>
-            <p className="text-gray-500 mt-2">{thread.description}</p>
-            {thread.tags && thread.tags.length > 0 && (
-              <div className="flex flex-wrap gap-2 mt-4">
-                {thread.tags.map((tag, index) => (
-                  <span
-                    key={index}
-                    className="px-2 py-1 bg-gray-100 text-gray-600 rounded-full text-sm"
-                  >
-                    {tag}
-                  </span>
-                ))}
-              </div>
-            )}
-          </motion.div>
-        )}
+        <div className="py-2">
+          {thread && <ThreadHeader thread={thread} />}
 
-        {isLoading ? (
-          <div className="space-y-4">
-            {[...Array(3)].map((_, index) => (
-              <div
-                key={index}
-                className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 animate-pulse"
-              >
-                <div className="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
-                <div className="h-4 bg-gray-200 rounded w-1/2"></div>
-              </div>
-            ))}
-          </div>
-        ) : notes.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12">
-            <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center mb-4">
-              <div className="w-6 h-6 border-3 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-            </div>
-            <p className="text-gray-500">Transcribing your audio...</p>
-            <p className="text-xs text-gray-400 mt-2">
-              This may take a few moments
-            </p>
-          </div>
-        ) : (
-          <motion.div
-            className="space-y-4"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.5 }}
-          >
-            {notes.map((note, index) => (
-              <div key={note.id}>
-                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-                  <p className="text-gray-800">{note.content}</p>
-                  <div className="mt-2 text-xs text-gray-500">
-                    {note.type === "audio"
-                      ? "🎤 Voice Note"
-                      : "✍️ Written Note"}
-                  </div>
+          {isLoading ? (
+            <div className="space-y-4 mt-8">
+              {[...Array(3)].map((_, index) => (
+                <div
+                  key={index}
+                  className="bg-white rounded-xl border border-border p-4 animate-pulse"
+                >
+                  <div className="h-4 bg-muted rounded w-3/4 mb-2"></div>
+                  <div className="h-4 bg-muted rounded w-1/2"></div>
                 </div>
-
-                {/* Show leading questions card below the most recent note */}
-                {index === notes.length - 1 &&
-                  thread?.leadingQuestions &&
-                  thread.leadingQuestions.length > 0 && (
-                    <motion.div
-                      className="mt-4 p-4 bg-blue-50 rounded-lg"
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      key={currentQuestionIndex}
-                      transition={{ duration: 0.3 }}
-                    >
-                      <h3 className="text-sm font-semibold text-blue-800 mb-2">
-                        Explore Further
-                      </h3>
-                      <p className="text-sm text-blue-700">
-                        {thread.leadingQuestions[currentQuestionIndex]}
-                      </p>
-                    </motion.div>
-                  )}
+              ))}
+            </div>
+          ) : notes.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 mt-8">
+              <div className="w-12 h-12 rounded-full bg-primary-100 flex items-center justify-center mb-4">
+                <div className="w-6 h-6 border-3 border-primary border-t-transparent rounded-full animate-spin"></div>
               </div>
-            ))}
-          </motion.div>
-        )}
-      </main>
+              <p className="text-muted-foreground">
+                Transcribing your audio...
+              </p>
+              <p className="text-xs text-muted-foreground/70 mt-2">
+                This may take a few moments
+              </p>
+            </div>
+          ) : (
+            <motion.div
+              className="space-y-0 mt-8"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.5 }}
+            >
+              {notes.map((note, index) => (
+                <div key={note.id}>
+                  <NoteItem note={note} />
+
+                  {/* Show leading questions card below the most recent note */}
+                  {index === notes.length - 1 &&
+                    thread?.leadingQuestions &&
+                    thread.leadingQuestions.length > 0 && (
+                      <LeadingQuestions questions={thread.leadingQuestions} />
+                    )}
+                </div>
+              ))}
+            </motion.div>
+          )}
+        </div>
+      </div>
 
       <FloatingDock onRecord={handleRecord} onWrite={handleWrite} />
 
