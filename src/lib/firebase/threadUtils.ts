@@ -11,7 +11,8 @@ import {
   where,
 } from "firebase/firestore";
 import { db } from "./firebase";
-import { Thread, Note } from "../types/thread";
+import { Thread } from "../types/thread";
+import { Note } from "../types/note";
 import { getAuth } from "firebase/auth";
 
 // Collection references
